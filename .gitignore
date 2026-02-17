@@ -1,0 +1,60 @@
+# ---- Flutter / Dart ----
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+
+# Build outputs
+build/
+
+# Generated plugin / platform folders (can be regenerated)
+ios/
+android/
+macos/
+linux/
+web/
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+
+# ---- IDE / Editor ----
+.idea/
+.vscode/
+*.iml
+
+# VS Code local history
+.history/
+
+# ---- OS-specific ----
+.DS_Store
+Thumbs.db
+
+# ---- Native / CMake / Visual Studio ----
+native/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Visual Studio / MSVC artifacts
+.vs/
+Debug/
+Release/
+x64/
+x86/
+*.user
+*.suo
+*.userprefs
+*.VC.db
+*.VC.VC.opendb
+
+# ---- Flutter Windows runner build outputs ----
+windows/.vs/
+windows/x64/
+windows/Debug/
+windows/Release/
+
