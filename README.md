@@ -1,4 +1,4 @@
-## Maze Runner Windows PoC (Flutter + C++ DLL)
+## Maze Runner Windows PoC
 
 This project is a Windows-first proof-of-concept that evaluates Flutter as a desktop UI for a simulator-style workload. It implements a simple 2D Maze Runner game where:
 

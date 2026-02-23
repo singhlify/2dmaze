@@ -1,5 +1,5 @@
 name: maze_runner_windows
-description: Simple 2D Maze Runner PoC using Flutter + C++ DLL via FFI (Windows-first).
+description: Simple 2D Maze Runner PoC (Windows-first).
 publish_to: "none"
 
 version: 0.1.0+1
@@ -11,6 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   ffi: ^2.1.0
+  http: ^1.2.0
 
 dev_dependencies:
   flutter_test:

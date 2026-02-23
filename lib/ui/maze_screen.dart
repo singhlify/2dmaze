@@ -5,13 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../native/maze_ffi.dart';
+import '../engine/maze_engine.dart';
 import '../state/maze_state.dart';
 import 'maze_painter.dart';
 
 /// Main screen hosting the maze canvas, controls, and stats.
 class MazeScreen extends StatefulWidget {
-  const MazeScreen({super.key});
+  const MazeScreen({super.key, required this.engine});
+
+  final MazeEngine engine;
 
   @override
   State<MazeScreen> createState() => _MazeScreenState();
@@ -121,7 +123,7 @@ class _MazeScreenState extends State<MazeScreen>
       final width = _selectedSize;
       final height = _selectedSize;
 
-      final cells = await MazeFfi.instance.generateMazeGrid(
+      final cells = await widget.engine.generateMaze(
         width: width,
         height: height,
         seed: seed,
@@ -159,12 +161,14 @@ class _MazeScreenState extends State<MazeScreen>
     });
     final stopwatch = Stopwatch()..start();
     try {
-      final path = await MazeFfi.instance.computeAStarPath(
+      final path = await widget.engine.astarPath(
         cells: _mazeState.cells,
         width: _mazeState.width,
         height: _mazeState.height,
-        start: CellPoint(_mazeState.playerX, _mazeState.playerY),
-        target: CellPoint(_mazeState.targetX, _mazeState.targetY),
+        sx: _mazeState.playerX,
+        sy: _mazeState.playerY,
+        tx: _mazeState.targetX,
+        ty: _mazeState.targetY,
       );
       stopwatch.stop();
       _mazeState
@@ -278,7 +282,7 @@ class _MazeScreenState extends State<MazeScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Maze Runner PoC (Flutter + C++ DLL)'),
+        title: const Text('Maze Runner PoC'),
       ),
       body: RawKeyboardListener(
         focusNode: _focusNode,

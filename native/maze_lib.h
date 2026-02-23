@@ -3,7 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef _WIN32
+#if defined(MAZE_STATIC)
+#  define MAZE_API  /* static link (e.g. server executable); no export/import */
+#elif defined(_WIN32)
 #  ifdef MAZE_LIB_BUILD
 #    define MAZE_API __declspec(dllexport)
 #  else

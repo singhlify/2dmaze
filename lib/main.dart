@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 
+import 'engine/maze_engine.dart';
+import 'engine/maze_engine_factory.dart';
 import 'ui/maze_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MazeRunnerApp());
+  final engine = createMazeEngine();
+  runApp(MazeRunnerApp(engine: engine));
 }
 
 class MazeRunnerApp extends StatelessWidget {
-  const MazeRunnerApp({super.key});
+  const MazeRunnerApp({required this.engine});
+
+  final MazeEngine engine;
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +23,7 @@ class MazeRunnerApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
         useMaterial3: true,
       ),
-      home: const MazeScreen(),
+      home: MazeScreen(engine: engine),
       debugShowCheckedModeBanner: false,
     );
   }
