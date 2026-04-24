@@ -2,12 +2,24 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <limits>
 #include <queue>
 #include <random>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32) && !defined(MAZE_STATIC)
+// GPU enumeration needs the DirectX headers. We keep this compiled
+// into the shared-library build only — the server_cpp static build
+// (MAZE_STATIC) doesn't link against d3d11/dxgi and doesn't need it.
+#  include <windows.h>
+#  include <d3d11.h>
+#  include <dxgi1_6.h>
+#endif
 
 namespace {
 
@@ -309,3 +321,151 @@ int astar_path(
   return path_len;
 }
 
+// --- query_gpu_info --------------------------------------------------------
+
+namespace {
+
+// Append printf-formatted text to (buf, remaining). Advances buf and
+// remaining. Safe against truncation.
+void append_fmt(char*& buf, int& remaining, const char* fmt, ...) {
+  if (remaining <= 1) return;
+  va_list ap;
+  va_start(ap, fmt);
+  int n = std::vsnprintf(buf, static_cast<size_t>(remaining), fmt, ap);
+  va_end(ap);
+  if (n < 0) return;
+  int wrote = (n < remaining) ? n : remaining - 1;
+  buf += wrote;
+  remaining -= wrote;
+}
+
+#if defined(_WIN32) && !defined(MAZE_STATIC)
+
+int wide_to_utf8(char* dst, int dst_size, const wchar_t* src) {
+  if (dst_size <= 0) return 0;
+  int n = WideCharToMultiByte(
+      CP_UTF8, 0, src, -1, dst, dst_size, nullptr, nullptr);
+  return (n > 0) ? (n - 1) : 0;  // exclude trailing null
+}
+
+void format_adapter_line(char*& buf, int& remaining, int index,
+                         const DXGI_ADAPTER_DESC1& desc) {
+  char name[256];
+  wide_to_utf8(name, sizeof(name), desc.Description);
+  const size_t mb_dedicated = desc.DedicatedVideoMemory / (1024 * 1024);
+  const size_t mb_shared = desc.SharedSystemMemory / (1024 * 1024);
+  const bool is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+  append_fmt(
+      buf, remaining,
+      "  [%d] %s (vendor=0x%04X device=0x%04X, %zu MB dedicated, "
+      "%zu MB shared%s)\n",
+      index, name, desc.VendorId, desc.DeviceId, mb_dedicated, mb_shared,
+      is_software ? ", SOFTWARE" : "");
+}
+
+#endif
+
+}  // namespace
+
+int query_gpu_info(char* out_buffer, int out_buffer_size) {
+  if (!out_buffer || out_buffer_size <= 0) {
+    return MAZE_ERROR_INVALID_ARGS;
+  }
+  char* buf = out_buffer;
+  int remaining = out_buffer_size;
+
+#if defined(_WIN32) && !defined(MAZE_STATIC)
+  append_fmt(buf, remaining, "[GPU] DXGI adapter enumeration:\n");
+
+  IDXGIFactory1* factory1 = nullptr;
+  HRESULT hr = CreateDXGIFactory1(
+      __uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory1));
+  if (FAILED(hr)) {
+    append_fmt(buf, remaining,
+               "[GPU]   CreateDXGIFactory1 failed (hr=0x%08X)\n",
+               static_cast<unsigned>(hr));
+    return static_cast<int>(buf - out_buffer);
+  }
+
+  for (UINT i = 0;; ++i) {
+    IDXGIAdapter1* adapter = nullptr;
+    if (factory1->EnumAdapters1(i, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+    DXGI_ADAPTER_DESC1 desc{};
+    if (SUCCEEDED(adapter->GetDesc1(&desc))) {
+      format_adapter_line(buf, remaining, static_cast<int>(i), desc);
+    }
+    adapter->Release();
+  }
+
+  IDXGIFactory6* factory6 = nullptr;
+  if (SUCCEEDED(factory1->QueryInterface(
+          __uuidof(IDXGIFactory6),
+          reinterpret_cast<void**>(&factory6)))) {
+    auto describe_pref = [&](DXGI_GPU_PREFERENCE pref, const char* label) {
+      IDXGIAdapter1* a = nullptr;
+      if (SUCCEEDED(factory6->EnumAdapterByGpuPreference(
+              0, pref, __uuidof(IDXGIAdapter1),
+              reinterpret_cast<void**>(&a)))) {
+        DXGI_ADAPTER_DESC1 desc{};
+        a->GetDesc1(&desc);
+        char name[256];
+        wide_to_utf8(name, sizeof(name), desc.Description);
+        append_fmt(buf, remaining, "[GPU]   %s preference: %s\n", label, name);
+        a->Release();
+      }
+    };
+    describe_pref(DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, "High-performance");
+    describe_pref(DXGI_GPU_PREFERENCE_MINIMUM_POWER, "Low-power       ");
+    factory6->Release();
+  }
+
+  // What a default D3D11 device picks (what ANGLE/Flutter effectively
+  // binds with no explicit adapter choice).
+  ID3D11Device* device = nullptr;
+  D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
+  D3D_FEATURE_LEVEL levels[] = {
+      D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
+      D3D_FEATURE_LEVEL_10_1};
+  hr = D3D11CreateDevice(
+      nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels,
+      ARRAYSIZE(levels), D3D11_SDK_VERSION, &device, &fl, nullptr);
+  if (SUCCEEDED(hr) && device) {
+    IDXGIDevice* dxgi_device = nullptr;
+    if (SUCCEEDED(device->QueryInterface(
+            __uuidof(IDXGIDevice),
+            reinterpret_cast<void**>(&dxgi_device)))) {
+      IDXGIAdapter* dxgi_adapter = nullptr;
+      if (SUCCEEDED(dxgi_device->GetAdapter(&dxgi_adapter))) {
+        DXGI_ADAPTER_DESC desc{};
+        dxgi_adapter->GetDesc(&desc);
+        char name[256];
+        wide_to_utf8(name, sizeof(name), desc.Description);
+        const char* fl_str =
+            (fl == D3D_FEATURE_LEVEL_11_1) ? "11_1" :
+            (fl == D3D_FEATURE_LEVEL_11_0) ? "11_0" :
+            (fl == D3D_FEATURE_LEVEL_10_1) ? "10_1" : "?";
+        append_fmt(
+            buf, remaining,
+            "[GPU]   Default D3D11 device (what ANGLE/Flutter sees): "
+            "%s (feature level %s)\n",
+            name, fl_str);
+        dxgi_adapter->Release();
+      }
+      dxgi_device->Release();
+    }
+    device->Release();
+  } else {
+    append_fmt(buf, remaining,
+               "[GPU]   D3D11CreateDevice(default) failed (hr=0x%08X)\n",
+               static_cast<unsigned>(hr));
+  }
+
+  factory1->Release();
+#else
+  append_fmt(
+      buf, remaining,
+      "[GPU] Adapter enumeration not implemented for this platform.\n");
+#endif
+
+  return static_cast<int>(buf - out_buffer);
+}

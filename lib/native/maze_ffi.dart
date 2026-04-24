@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart' as pkg_ffi;
 
+import '../logging/logger.dart';
 import '../state/maze_state.dart';
 
 /// Thin Dart FFI wrapper around the native C++ maze DLL.
@@ -19,26 +20,62 @@ class MazeFfi {
 
   late final _GenerateMazeDart _generateMaze;
   late final _AStarPathDart _astarPath;
+  late final _QueryGpuInfoDart _queryGpuInfo;
 
   static ffi.DynamicLibrary _openLibrary() {
-    if (!Platform.isWindows) {
-      // This PoC targets Windows only.
+    final candidates = _libraryCandidates();
+
+    Object? lastError;
+    for (final path in candidates) {
+      try {
+        final lib = ffi.DynamicLibrary.open(path);
+        // ignore: avoid_print
+        print('[MazeFfi] Loaded native maze library from "$path".');
+        return lib;
+      } on Object catch (e) {
+        lastError = e;
+      }
+    }
+
+    // ignore: avoid_print
+    print('[MazeFfi] Failed to load native maze library. '
+        'Tried: ${candidates.join(", ")}. Last error: $lastError');
+    throw UnsupportedError(
+      'Could not load native maze library on ${Platform.operatingSystem}. '
+      'Tried: ${candidates.join(", ")}',
+    );
+  }
+
+  /// Ordered list of paths to try when loading the native library.
+  ///
+  /// On desktop Flutter the library ends up next to the runner executable
+  /// (via CMake install rules), so we try there first, then fall back to the
+  /// plain filename which lets the OS loader search its usual paths.
+  static List<String> _libraryCandidates() {
+    final String fileName;
+    if (Platform.isWindows) {
+      fileName = 'maze_lib.dll';
+    } else if (Platform.isMacOS) {
+      fileName = 'libmaze_lib.dylib';
+    } else if (Platform.isLinux) {
+      fileName = 'libmaze_lib.so';
+    } else {
       throw UnsupportedError(
-        'maze_lib.dll loading is only supported on Windows in this PoC.',
+        'Unsupported platform for maze_lib: ${Platform.operatingSystem}',
       );
     }
 
-    try {
-      final lib = ffi.DynamicLibrary.open('maze_lib.dll');
-      // Basic debug log.
-      // ignore: avoid_print
-      print('[MazeFfi] Loaded maze_lib.dll successfully.');
-      return lib;
-    } on Object catch (e) {
-      // ignore: avoid_print
-      print('[MazeFfi] Failed to load maze_lib.dll: $e');
-      rethrow;
-    }
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final sep = Platform.pathSeparator;
+
+    // On Linux Flutter desktop, bundled libs live under <bundle>/lib/
+    // with RPATH $ORIGIN/lib on the executable. On Windows, DLLs sit
+    // next to the exe. macOS follows Linux-like convention for this PoC.
+    return <String>[
+      '$exeDir${sep}lib$sep$fileName',
+      '$exeDir$sep$fileName',
+      fileName,
+    ];
   }
 
   void _bindFunctions() {
@@ -46,6 +83,34 @@ class MazeFfi {
         .lookupFunction<_GenerateMazeNative, _GenerateMazeDart>('generate_maze');
     _astarPath = _library
         .lookupFunction<_AStarPathNative, _AStarPathDart>('astar_path');
+    _queryGpuInfo = _library
+        .lookupFunction<_QueryGpuInfoNative, _QueryGpuInfoDart>('query_gpu_info');
+  }
+
+  /// Asks the native library for GPU / adapter info and prints it to
+  /// stdout. On Windows this enumerates all DXGI adapters, reports the
+  /// OS preference for high-performance vs low-power, and the adapter
+  /// a default D3D11 device binds to (what ANGLE/Flutter sees). Elsewhere
+  /// it prints a short "unsupported" line.
+  void logGpuInfo() {
+    const int bufferSize = 4096;
+    final ffi.Pointer<ffi.Uint8> buffer =
+        pkg_ffi.calloc<ffi.Uint8>(bufferSize);
+    try {
+      final int written = _queryGpuInfo(buffer.cast<ffi.Int8>(), bufferSize);
+      if (written <= 0) {
+        logLine('[MazeFfi] query_gpu_info returned $written');
+        return;
+      }
+      final bytes = buffer.asTypedList(written);
+      final text = String.fromCharCodes(bytes);
+      for (final line in text.split('\n')) {
+        if (line.trim().isEmpty) continue;
+        logLine(line);
+      }
+    } finally {
+      pkg_ffi.calloc.free(buffer);
+    }
   }
 
   /// Generate a maze grid using the native DLL.
@@ -187,5 +252,15 @@ typedef _AStarPathDart = int Function(
   int ty,
   ffi.Pointer<ffi.Int32> outPathXY,
   int outPathXYLen,
+);
+
+typedef _QueryGpuInfoNative = ffi.Int32 Function(
+  ffi.Pointer<ffi.Int8> outBuffer,
+  ffi.Int32 outBufferSize,
+);
+
+typedef _QueryGpuInfoDart = int Function(
+  ffi.Pointer<ffi.Int8> outBuffer,
+  int outBufferSize,
 );
 

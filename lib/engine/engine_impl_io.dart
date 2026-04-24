@@ -1,5 +1,5 @@
-import 'native_maze_engine.dart';
+import 'package:maze_runner_windows/maze/maze_backend.dart';
 import 'maze_engine.dart';
 
-/// Desktop/IO implementation: returns [NativeMazeEngine] (uses maze_lib.dll via FFI).
-MazeEngine createMazeEngine() => NativeMazeEngine();
+/// Desktop/IO implementation: returns [MazeEngineFromBackend] with [DesktopFfiBackend].
+MazeEngine createMazeEngine() => MazeEngineFromBackend(createMazeBackend());

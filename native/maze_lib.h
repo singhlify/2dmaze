@@ -11,6 +11,8 @@
 #  else
 #    define MAZE_API __declspec(dllimport)
 #  endif
+#elif defined(__GNUC__) || defined(__clang__)
+#  define MAZE_API __attribute__((visibility("default")))
 #else
 #  define MAZE_API
 #endif
@@ -76,6 +78,21 @@ MAZE_API int astar_path(
   int ty,
   int32_t* out_path_xy,
   int out_path_xy_len);
+
+// Query GPU / graphics-adapter information from the OS and write a
+// human-readable multi-line summary into out_buffer (UTF-8, null-
+// terminated).
+//
+// On Windows this enumerates all DXGI adapters, reports which adapter
+// Windows prefers for high-performance and low-power applications, and
+// which adapter a default D3D11 device binds to (what ANGLE/Flutter
+// effectively sees with no explicit GPU choice).
+//
+// On other platforms this writes a short "not supported" line.
+//
+// Returns the number of bytes written (not including the null
+// terminator), or a negative MAZE_ERROR_* code on invalid args.
+MAZE_API int query_gpu_info(char* out_buffer, int out_buffer_size);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,47 @@ class CellPoint {
 
   final int x;
   final int y;
+}
+
+/// Visual mode for the maze view.
+enum ViewMode {
+  view2D,
+  view3D,
+}
+
+/// Cardinal facing direction used by the 3D first-person view.
+/// Clockwise from north: N=0, E=1, S=2, W=3.
+enum Facing {
+  north,
+  east,
+  south,
+  west,
+}
+
+extension FacingOps on Facing {
+  Facing turnedLeft() => Facing.values[(index + 3) % 4];
+  Facing turnedRight() => Facing.values[(index + 1) % 4];
+
+  /// Unit delta to step "forward" one cell from this facing.
+  /// North = -y, East = +x, South = +y, West = -x.
+  (int, int) get forwardDelta {
+    switch (this) {
+      case Facing.north: return (0, -1);
+      case Facing.east:  return (1, 0);
+      case Facing.south: return (0, 1);
+      case Facing.west:  return (-1, 0);
+    }
+  }
+
+  /// Yaw (radians) for a three_js camera: yaw=0 looks at +Z (south).
+  double get yaw {
+    switch (this) {
+      case Facing.north: return math.pi;
+      case Facing.east:  return math.pi / 2;
+      case Facing.south: return 0;
+      case Facing.west:  return -math.pi / 2;
+    }
+  }
 }
 
 /// Holds maze data and player / path state.
@@ -29,12 +71,21 @@ class MazeState extends ChangeNotifier {
 
   // A* path as ordered list of cells from start to target.
   List<CellPoint> _path = const [];
-  bool _showPath = true;
+  // Hidden by default — the path is a user-requested hint, not an
+  // always-on guide. Toggle Path flips it, Solve computes a fresh one.
+  bool _showPath = false;
 
   // Simple stats.
   double _lastMazeGenMs = 0;
   double _lastSolveMs = 0;
   double _fps = 0;
+
+  // Current visual mode.
+  ViewMode _viewMode = ViewMode.view2D;
+
+  // Player's facing direction (used only in 3D mode). Default: south, so
+  // the player starts looking toward the default target at (w-1, h-1).
+  Facing _facing = Facing.south;
 
   // FPS tracking internals (updated externally by a ticker).
   void updateFps(double fps) {
@@ -62,6 +113,9 @@ class MazeState extends ChangeNotifier {
   double get lastSolveMs => _lastSolveMs;
   double get fps => _fps;
 
+  ViewMode get viewMode => _viewMode;
+  Facing get facing => _facing;
+
   int get pathLength => _path.length;
 
   /// Configure maze (cells, dimensions, seed) and reset player/target.
@@ -81,8 +135,15 @@ class MazeState extends ChangeNotifier {
     _playerY = 0;
     _targetX = max(0, width - 1);
     _targetY = max(0, height - 1);
+    _facing = Facing.south;
 
     _path = const [];
+    notifyListeners();
+  }
+
+  set viewMode(ViewMode mode) {
+    if (_viewMode == mode) return;
+    _viewMode = mode;
     notifyListeners();
   }
 
@@ -116,7 +177,45 @@ class MazeState extends ChangeNotifier {
   void resetPlayer() {
     _playerX = 0;
     _playerY = 0;
+    _facing = Facing.south;
     notifyListeners();
+  }
+
+  /// Turn the player 90° left (3D mode). No-op in 2D.
+  void turnLeft() {
+    _facing = _facing.turnedLeft();
+    notifyListeners();
+  }
+
+  /// Turn the player 90° right (3D mode). No-op in 2D.
+  void turnRight() {
+    _facing = _facing.turnedRight();
+    notifyListeners();
+  }
+
+  /// Step one cell in the current facing direction (3D mode).
+  /// Blocked by walls via the same bitmask collision rules as 2D.
+  void stepForward() {
+    final (dx, dy) = _facing.forwardDelta;
+    movePlayer(dx, dy);
+  }
+
+  /// Step one cell opposite the current facing direction (3D mode).
+  void stepBackward() {
+    final (dx, dy) = _facing.forwardDelta;
+    movePlayer(-dx, -dy);
+  }
+
+  /// Strafe one cell to the player's left (perpendicular to facing).
+  void strafeLeft() {
+    final (dx, dy) = _facing.turnedLeft().forwardDelta;
+    movePlayer(dx, dy);
+  }
+
+  /// Strafe one cell to the player's right (perpendicular to facing).
+  void strafeRight() {
+    final (dx, dy) = _facing.turnedRight().forwardDelta;
+    movePlayer(dx, dy);
   }
 
   void setTarget(int x, int y) {
